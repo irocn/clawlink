@@ -1,4 +1,5 @@
 # ClawLink
+Note!!! Winodws need version is win10+ and later.
 
 Windows tray client for ClawLink / itunnel. The Flutter UI (`clawlink.exe`) talks to an elevated tunnel host (`clawlink-core.exe`) over a named pipe.
 
