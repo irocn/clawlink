@@ -1,0 +1,6 @@
+# Keep shipped native deps in git; ignore junk only.
+*
+!.gitignore
+!clawlink-core.exe
+!wintun.dll
+!README.md
