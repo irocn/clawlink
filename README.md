@@ -15,12 +15,12 @@ Control pipe: `\\.\pipe\clawlink\control`
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="assets/start.PNG" alt="启动时" width="100%" /><br/>
-      <sub>1. 启动时</sub>
+      <img src="assets/start.PNG" alt="On startup" width="100%" /><br/>
+      <sub>1. On startup</sub>
     </td>
     <td align="center" width="50%">
-      <img src="assets/clawlink.PNG" alt="连接时" width="100%" /><br/>
-      <sub>2. 连接时</sub>
+      <img src="assets/clawlink.PNG" alt="When connected" width="100%" /><br/>
+      <sub>2. When connected</sub>
     </td>
   </tr>
 </table>
