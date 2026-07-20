@@ -10,6 +10,21 @@ Windows tray client for ClawLink / itunnel. The Flutter UI (`clawlink.exe`) talk
 
 Control pipe: `\\.\pipe\clawlink\control`
 
+## Runtime
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/start.PNG" alt="启动时" width="100%" /><br/>
+      <sub>1. 启动时</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/clawlink.PNG" alt="连接时" width="100%" /><br/>
+      <sub>2. 连接时</sub>
+    </td>
+  </tr>
+</table>
+
 ## Layout
 
 ```
