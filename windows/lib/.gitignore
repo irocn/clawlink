@@ -1,0 +1,3 @@
+# Built from sibling itunnel/crates/libfakeip (see scripts/sync-libfakeip.ps1).
+*
+!.gitignore

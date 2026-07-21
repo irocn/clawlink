@@ -7,10 +7,18 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core_client.dart';
+import 'fakeip/libfakeip.dart';
+import 'local_proxy/local_proxy.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
+
+  if (libFakeIp.isAvailable) {
+    debugPrint('libfakeip: ${libFakeIp.buildId} (${libFakeIp.loadedPath})');
+  } else {
+    debugPrint('libfakeip: not loaded (run scripts/sync-libfakeip.ps1)');
+  }
 
   const winOpts = WindowOptions(
     size: Size(440, 600),
@@ -90,6 +98,7 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
   String _localTunIp = '';
   bool _trayConnected = false;
   bool _statusInFlight = false;
+  final _localProxy = LocalProxyController();
 
   bool get _hasSavedInvite => _savedInvite.isNotEmpty;
 
@@ -99,6 +108,7 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
     windowManager.addListener(this);
     trayManager.addListener(this);
     _initTray();
+    _loadLocalProxyPref();
     _loadSavedInvite();
     _poll = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_busy) _refreshStatus(silent: true);
@@ -156,6 +166,9 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
   void dispose() {
     _poll?.cancel();
     _inviteCtrl.dispose();
+    if (_localProxy.running) {
+      unawaited(_localProxy.stop());
+    }
     trayManager.removeListener(this);
     windowManager.removeListener(this);
     super.dispose();
@@ -256,6 +269,55 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
     }
   }
 
+  Future<void> _loadLocalProxyPref() async {
+    await _localProxy.loadPref();
+    if (mounted) setState(() {});
+  }
+
+  LocalProxySession? _proxySessionOrNull() {
+    if (!_isConnected) return null;
+    final iface = _status.iface.trim();
+    if (iface.isEmpty) return null;
+    return LocalProxySession(ifaceAlias: iface, endpoint: _status.endpoint);
+  }
+
+  Future<void> _setLocalProxyMode(LocalProxyMode mode) async {
+    await _localProxy.setMode(mode, session: _proxySessionOrNull());
+    if (!mounted) return;
+    setState(() {
+      if (_localProxy.lastError != null) _message = _localProxy.lastError;
+    });
+  }
+
+  /// Wait until core reports connected + iface (needed for ifIndex / routes).
+  Future<bool> _waitTunnelReady({Duration timeout = const Duration(seconds: 12)}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      await _refreshStatus(silent: true);
+      if (_status.state == 'connected' && _status.iface.trim().isNotEmpty) {
+        return true;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return _status.state == 'connected';
+  }
+
+  Future<void> _startLocalProxy() async {
+    if (!_localProxy.enabled) return;
+    final ready = await _waitTunnelReady();
+    if (!ready || _status.iface.trim().isEmpty) {
+      if (mounted) setState(() => _message = 'Local proxy: tunnel not ready yet');
+      return;
+    }
+    await _localProxy.start(
+      LocalProxySession(ifaceAlias: _status.iface, endpoint: _status.endpoint),
+    );
+    if (!mounted) return;
+    setState(() {
+      if (_localProxy.lastError != null) _message = _localProxy.lastError;
+    });
+  }
+
   Future<void> _loadSavedInvite() async {
     // Prefer core when running; otherwise read ~/.clawlink/invite.txt locally.
     try {
@@ -346,12 +408,18 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
         }
       }
       await _client.connect();
+      if (_localProxy.enabled) {
+        await _startLocalProxy();
+      }
     });
     if (mounted) setState(() {});
   }
 
   Future<void> _disconnect() async {
-    await _run(() => _client.disconnect());
+    await _run(() async {
+      await _localProxy.stop();
+      await _client.disconnect();
+    });
   }
 
   Future<void> _toggleConnect() async {
@@ -367,7 +435,12 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
   }
 
   Future<void> _setEndpoint(String endpoint) async {
-    await _run(() => _client.setEndpoint(endpoint));
+    await _run(() async {
+      await _client.setEndpoint(endpoint);
+      await _refreshStatus(silent: true);
+      final session = _proxySessionOrNull();
+      if (session != null) await _localProxy.refreshEndpoint(session);
+    });
   }
 
   bool get _showEndpointControls => _status.endpoints.length >= 2;
@@ -387,15 +460,7 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
     return eps.first;
   }
 
-  String _endpointHost(String ep) {
-    if (ep.startsWith('[')) {
-      final end = ep.indexOf(']');
-      if (end > 1) return ep.substring(1, end);
-    }
-    final i = ep.lastIndexOf(':');
-    if (i <= 0) return ep;
-    return ep.substring(0, i);
-  }
+  String _endpointHost(String ep) => WindowsRoutes.endpointHost(ep);
 
   String get _handshakeAgeLabel {
     if (_status.handshakeAgeMs <= 0) return '—';
@@ -437,6 +502,7 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
       if (await _client.isPipeAvailable()) {
         // Drop active tunnel first so we do not keep using a deleted invite.
         try {
+          await _localProxy.stop();
           await _client.disconnect();
         } catch (_) {}
         await _client.clearInvite();
@@ -505,6 +571,7 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
 
   Future<void> _exitApp() async {
     _poll?.cancel();
+    await _localProxy.stop();
     // Best-effort shutdown off the UI thread; --parent-pid also stops core on exit.
     unawaited(_client.shutdown());
     try {
@@ -661,10 +728,56 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
               ],
               const SizedBox(height: 12),
             ],
+            Text(
+              'Local traffic',
+              style: theme.textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<LocalProxyMode>(
+              segments: const [
+                ButtonSegment(
+                  value: LocalProxyMode.off,
+                  label: Text('Off'),
+                  tooltip: 'Do not proxy this PC',
+                ),
+                ButtonSegment(
+                  value: LocalProxyMode.smart,
+                  label: Text('Smart'),
+                  tooltip: 'Blocked sites via tunnel; others direct',
+                ),
+                ButtonSegment(
+                  value: LocalProxyMode.global,
+                  label: Text('Global'),
+                  tooltip: 'Most traffic via tunnel; endpoint + LAN stay direct',
+                ),
+              ],
+              selected: {_localProxy.mode},
+              onSelectionChanged: _busy
+                  ? null
+                  : (s) {
+                      if (s.isNotEmpty) _setLocalProxyMode(s.first);
+                    },
+            ),
+            const SizedBox(height: 6),
+            Text(
+              switch (_localProxy.mode) {
+                LocalProxyMode.off => 'Tunnel only for ClawLink itself',
+                LocalProxyMode.smart => 'Blocked sites use the tunnel; the rest stay direct',
+                LocalProxyMode.global =>
+                  'All sites via tunnel; endpoint IP and LAN stay direct',
+              },
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+            ),
             const Spacer(),
             Text('ClawLink IP: ${_status.tunIp.isEmpty ? '—' : _status.tunIp}'),
             if (!_showEndpointControls)
               Text('Endpoint: ${_status.endpoint.isEmpty ? '—' : _status.endpoint}'),
+            if (_isConnected && _localProxy.enabled)
+              Text(
+                _localProxy.running
+                    ? 'Local proxy: ${_localProxy.mode.name}'
+                    : 'Local proxy: starting…',
+              ),
             Text('Handshake age: $_handshakeAgeLabel'),
             Text('RX / TX: ${_formatBytes(_status.rxBytes)} / ${_formatBytes(_status.txBytes)}'),
             if (_status.error.isNotEmpty) ...[
