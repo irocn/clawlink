@@ -17,8 +17,14 @@ Assert-Command flutter
 
 $libsCore = Join-Path $Root "libs\clawlink-core.exe"
 $libsWintun = Join-Path $Root "libs\wintun.dll"
+$libsFakeip = Join-Path $Root "libs\libfakeip.dll"
 if (-not (Test-Path $libsCore)) { throw "Missing $libsCore" }
 if (-not (Test-Path $libsWintun)) { throw "Missing $libsWintun" }
+if (-not (Test-Path $libsFakeip)) {
+    Write-Host "==> libfakeip.dll missing; running scripts\sync-libfakeip.ps1"
+    & (Join-Path $Root "scripts\sync-libfakeip.ps1")
+    if (-not (Test-Path $libsFakeip)) { throw "Missing $libsFakeip after sync" }
+}
 
 Write-Host "==> flutter pub get"
 & flutter pub get
@@ -53,12 +59,26 @@ $outLibs = Join-Path $Out "libs"
 New-Item -ItemType Directory -Force -Path $outLibs | Out-Null
 Copy-Item -Force $libsCore $outLibs
 Copy-Item -Force $libsWintun $outLibs
+Copy-Item -Force $libsFakeip $outLibs
 
 # Ensure Release\libs is populated even if CMake install skipped a clean tree.
 $relLibs = Join-Path $release "libs"
 New-Item -ItemType Directory -Force -Path $relLibs | Out-Null
 Copy-Item -Force $libsCore $relLibs
 Copy-Item -Force $libsWintun $relLibs
+Copy-Item -Force $libsFakeip $relLibs
+
+# Dart FFI also looks next to the EXE / under data/.
+Copy-Item -Force $libsFakeip (Join-Path $Out "libfakeip.dll")
+Copy-Item -Force $libsFakeip (Join-Path $release "libfakeip.dll")
+$dataDir = Join-Path $release "data"
+if (Test-Path $dataDir) {
+    Copy-Item -Force $libsFakeip (Join-Path $dataDir "libfakeip.dll")
+}
+$outData = Join-Path $Out "data"
+if (Test-Path $outData) {
+    Copy-Item -Force $libsFakeip (Join-Path $outData "libfakeip.dll")
+}
 
 Write-Host ""
 Write-Host "Done. Output:"

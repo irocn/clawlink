@@ -3,4 +3,5 @@
 !.gitignore
 !clawlink-core.exe
 !wintun.dll
+!libfakeip.dll
 !README.md

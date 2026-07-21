@@ -107,11 +107,27 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
 
-# Ship clawlink-core + wintun next to the GUI under libs/.
+# Ship clawlink-core + wintun + libfakeip next to the GUI under libs/.
 set(CLAWLINK_LIBS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libs")
 install(DIRECTORY "${CLAWLINK_LIBS_DIR}/"
   DESTINATION "${CMAKE_INSTALL_PREFIX}/libs"
   COMPONENT Runtime
   FILES_MATCHING
     PATTERN "clawlink-core.exe"
-    PATTERN "wintun.dll")
+    PATTERN "wintun.dll"
+    PATTERN "libfakeip.dll")
+
+# Also place libfakeip.dll next to the EXE and under data/ for Dart FFI.
+# (Do not use install(CODE) with CMAKE_INSTALL_PREFIX — genex is not expanded there.)
+set(_install_fakeip "${CMAKE_CURRENT_SOURCE_DIR}/lib/libfakeip.dll")
+if(NOT EXISTS "${_install_fakeip}")
+  set(_install_fakeip "${CLAWLINK_LIBS_DIR}/libfakeip.dll")
+endif()
+if(EXISTS "${_install_fakeip}")
+  install(FILES "${_install_fakeip}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    COMPONENT Runtime)
+  install(FILES "${_install_fakeip}"
+    DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
+    COMPONENT Runtime)
+endif()
